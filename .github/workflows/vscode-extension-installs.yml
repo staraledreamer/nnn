@@ -56,56 +56,54 @@ jobs:
           success=0
           fail=0
 
+          # Detect the active network interface
+          IFACE=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'dev \K\S+' | head -1)
+          echo "🌐 Network interface: $IFACE"
+
           for i in $(seq 1 "$ITERATIONS"); do
             DATA_DIR="/tmp/vscode-data-${JOB_ID}-${i}"
             EXT_DIR="/tmp/vscode-ext-${JOB_ID}-${i}"
 
             echo "--- Job $JOB_ID | Attempt $i/$ITERATIONS ---"
 
-            # ── STEP 1: Kill every VS Code process and socket ──────────────
+            # ── STEP 1: Kill leftover VS Code processes ──────────────────────
             pkill -9 -f "code" 2>/dev/null || true
-            pkill -9 -f "vscode" 2>/dev/null || true
-            rm -f /tmp/.code-* /tmp/vscode-* 2>/dev/null || true
-            sleep 0.5
+            sleep 0.3
 
-            # ── STEP 2: Generate a fresh UUID for this install ──────────────
+            # ── STEP 2: Generate a random valid locally-administered MAC ─────
+            # First byte: 0x02 = locally administered + unicast (required)
+            NEW_MAC=$(printf '02:%02x:%02x:%02x:%02x:%02x' \
+              $((RANDOM % 256)) \
+              $((RANDOM % 256)) \
+              $((RANDOM % 256)) \
+              $((RANDOM % 256)) \
+              $((RANDOM % 256)))
+            echo "🔀 Spoofing MAC to: $NEW_MAC"
+
+            # ── STEP 3: Apply new MAC to the real NIC ───────────────────────
+            sudo ip link set dev "$IFACE" down
+            sudo ip link set dev "$IFACE" address "$NEW_MAC"
+            sudo ip link set dev "$IFACE" up
+            sleep 1  # wait for interface to come back up
+
+            # ── STEP 4: Fresh UUID matching the new MAC identity ─────────────
             NEW_UUID=$(cat /proc/sys/kernel/random/uuid)
-            echo "🆔 Machine ID: $NEW_UUID"
-
-            # ── STEP 3: Nuke ALL system-level VS Code identity/cache ────────
-            # This is the critical part — marketplace reads ~/.config/Code/machineid
-            rm -rf ~/.config/Code
-            rm -rf ~/.vscode
-            rm -rf ~/.config/code-flags.conf 2>/dev/null || true
-
-            # ── STEP 4: Recreate system config with brand new machine ID ────
-            mkdir -p ~/.config/Code
-            echo "$NEW_UUID" > ~/.config/Code/machineid
-
-            # Also pre-create storage.json with matching fresh IDs
-            cat > ~/.config/Code/storage.json <<EOF
-          {
-            "telemetry.machineId": "$NEW_UUID",
-            "telemetry.devDeviceId": "$(cat /proc/sys/kernel/random/uuid)",
-            "telemetry.firstSessionDate": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)",
-            "telemetry.lastSessionDate": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-          }
-          EOF
-
-            # ── STEP 5: Set up isolated dirs with matching machine ID ────────
             mkdir -p "$DATA_DIR"
             echo "$NEW_UUID" > "$DATA_DIR/machineid"
+            echo "🆔 Machine ID: $NEW_UUID"
 
-            # ── STEP 6: Install extension ────────────────────────────────────
+            # ── STEP 5: Install extension ────────────────────────────────────
             timeout 15 code \
               --install-extension "$EXT_ID" \
               --force \
               --no-sandbox \
-              --disable-telemetry \
               --disable-updates \
               --user-data-dir "$DATA_DIR" \
               --extensions-dir "$EXT_DIR" \
               2>/dev/null
+
+            # ── STEP 6: Wait for telemetry ping to fire ──────────────────────
+            sleep 3
 
             # ── STEP 7: Verify ───────────────────────────────────────────────
             if timeout 5 code \
@@ -121,12 +119,10 @@ jobs:
               echo "❌ Job $JOB_ID attempt $i FAILED (fails: $fail)"
             fi
 
-            # ── STEP 8: Full wipe before next iteration ──────────────────────
+            # ── STEP 8: Wipe before next iteration ───────────────────────────
             pkill -9 -f "code" 2>/dev/null || true
             rm -rf "$DATA_DIR" "$EXT_DIR"
-            rm -rf ~/.config/Code ~/.vscode
 
-            sleep 0.2
           done
 
           echo "======================================="
@@ -140,9 +136,7 @@ jobs:
         run: |
           pkill -9 -f code || true
           rm -rf /tmp/vscode-data-${{ matrix.job_id }}-* \
-                 /tmp/vscode-ext-${{ matrix.job_id }}-* \
-                 ~/.config/Code \
-                 ~/.vscode || true
+                 /tmp/vscode-ext-${{ matrix.job_id }}-* || true
 
   summary:
     needs: [setup, vscode-install-farm]
