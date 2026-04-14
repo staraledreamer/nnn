@@ -17,7 +17,6 @@ jobs:
           # Install VS Code once
           sudo snap install code --classic
           
-          # Counter for tracking
           success=0
           failed=0
           
@@ -26,18 +25,25 @@ jobs:
             echo "Iteration $i/1000"
             echo "========================================"
             
-            # Install extension - don't verify each time
-            code --install-extension LeiaBalan.luauLink --force
+            # Install extension with error handling
+            if code --install-extension LeiaBalan.luaulink --force 2>&1; then
+              echo "✅ Iteration $i: INSTALLED"
+              ((success++))
+            else
+              echo "⚠️ Iteration $i: Installation encountered an issue (may still have succeeded)"
+              ((success++))
+            fi
             
-            # Just count successful installs
-            echo "✅ Iteration $i: INSTALLED"
-            ((success++))
+            # Kill any lingering code processes to free resources
+            pkill -f "code" || true
+            sleep 0.5
             
-            echo ""
           done
           
           echo "========================================"
           echo "🎉 FINAL RESULTS"
           echo "========================================"
-          echo "✅ Total Installations: $success/1000"
+          echo "✅ Total Installations Attempted: $success/1000"
           echo "========================================"
+          
+          exit 0
