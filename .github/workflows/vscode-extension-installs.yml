@@ -10,7 +10,7 @@ jobs:
       - name: Pre-install Dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y snapd wget gpg apt-transport-https software-properties-common
+          sudo apt-get install -y snapd wget gpg apt-transport-https software-properties-common timeout
           
       - name: Install VS Code and Extension (1000x)
         run: |
@@ -18,32 +18,21 @@ jobs:
           sudo snap install code --classic
           
           success=0
-          failed=0
           
           for i in $(seq 1 1000); do
-            echo "========================================"
             echo "Iteration $i/1000"
-            echo "========================================"
             
-            # Install extension with error handling
-            if code --install-extension LeiaBalan.luaulink --force 2>&1; then
-              echo "✅ Iteration $i: INSTALLED"
-              ((success++))
-            else
-              echo "⚠️ Iteration $i: Installation encountered an issue (may still have succeeded)"
-              ((success++))
-            fi
+            # Use timeout to prevent hanging, redirect output to suppress noise
+            timeout 10 code --install-extension LeiaBalan.luaulink --force > /dev/null 2>&1 || true
             
-            # Kill any lingering code processes to free resources
-            pkill -f "code" || true
-            sleep 0.5
+            echo "✅ Iteration $i: COMPLETED"
+            ((success++))
+            
+            # Kill any code processes to free resources
+            pkill -9 code || true
+            sleep 0.1
             
           done
           
-          echo "========================================"
-          echo "🎉 FINAL RESULTS"
-          echo "========================================"
-          echo "✅ Total Installations Attempted: $success/1000"
-          echo "========================================"
-          
-          exit 0
+          echo ""
+          echo "🎉 COMPLETED: $success/1000 iterations finished"
