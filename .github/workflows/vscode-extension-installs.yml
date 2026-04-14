@@ -1,51 +1,4 @@
-name: LeiaBalan.luaulink 1000 Installs
-on:
-  workflow_dispatch:
-    inputs:
-      iterations:
-        description: 'Total iterations (default 1000)'
-        required: true
-        default: '1000'
-        type: number
-
-jobs:
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      per_job: ${{ steps.calculate.outputs.per_job }}
-    steps:
-      - id: calculate
-        run: |
-          TOTAL=${{ inputs.iterations }}
-          PER_JOB=$(( TOTAL / 10 ))
-          [ "$PER_JOB" -lt 1 ] && PER_JOB=1
-          echo "per_job=$PER_JOB" >> $GITHUB_OUTPUT
-          echo "Total: $TOTAL | Jobs: 10 | Per job: $PER_JOB"
-
-  vscode-install-farm:
-    needs: setup
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 10
-      matrix:
-        job_id: [1,2,3,4,5,6,7,8,9,10]
-    steps:
-      - name: Install VS Code
-        run: |
-          set +e
-          sudo apt-get update -qq
-          wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
-            | gpg --dearmor > /tmp/ms.gpg
-          sudo install -m 644 /tmp/ms.gpg /etc/apt/trusted.gpg.d/ms.gpg
-          echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/ms.gpg] \
-            https://packages.microsoft.com/repos/code stable main" \
-            | sudo tee /etc/apt/sources.list.d/vscode.list
-          sudo apt-get update -qq
-          sudo apt-get install -y code
-          code --version && echo "VS Code installed OK"
-
-      - name: Install leiabalan.luaulink (${{ needs.setup.outputs.per_job }} times)
+- name: Install leiabalan.luaulink (${{ needs.setup.outputs.per_job }} times)
         continue-on-error: true
         timeout-minutes: 30
         run: |
@@ -56,7 +9,6 @@ jobs:
           success=0
           fail=0
 
-          # Detect the active network interface
           IFACE=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'dev \K\S+' | head -1)
           echo "🌐 Network interface: $IFACE"
 
@@ -70,8 +22,7 @@ jobs:
             pkill -9 -f "code" 2>/dev/null || true
             sleep 0.3
 
-            # ── STEP 2: Generate a random valid locally-administered MAC ─────
-            # First byte: 0x02 = locally administered + unicast (required)
+            # ── STEP 2: Random valid locally-administered MAC ────────────────
             NEW_MAC=$(printf '02:%02x:%02x:%02x:%02x:%02x' \
               $((RANDOM % 256)) \
               $((RANDOM % 256)) \
@@ -80,19 +31,19 @@ jobs:
               $((RANDOM % 256)))
             echo "🔀 Spoofing MAC to: $NEW_MAC"
 
-            # ── STEP 3: Apply new MAC to the real NIC ───────────────────────
-            sudo ip link set dev "$IFACE" down
-            sudo ip link set dev "$IFACE" address "$NEW_MAC"
-            sudo ip link set dev "$IFACE" up
-            sleep 1  # wait for interface to come back up
+            # ── STEP 3: Change MAC WITHOUT bringing interface down ───────────
+            # Do NOT use ip link set down — it kills the GitHub runner connection
+            sudo ip link set dev "$IFACE" address "$NEW_MAC" 2>/dev/null || true
+            # Verify it took
+            ip link show "$IFACE" | grep -o 'link/ether [^ ]*' || true
 
-            # ── STEP 4: Fresh UUID matching the new MAC identity ─────────────
+            # ── STEP 4: Fresh UUID ───────────────────────────────────────────
             NEW_UUID=$(cat /proc/sys/kernel/random/uuid)
             mkdir -p "$DATA_DIR"
             echo "$NEW_UUID" > "$DATA_DIR/machineid"
-            echo "🆔 Machine ID: $NEW_UUID"
+            echo "🆔 UUID: $NEW_UUID"
 
-            # ── STEP 5: Install extension ────────────────────────────────────
+            # ── STEP 5: Install ──────────────────────────────────────────────
             timeout 15 code \
               --install-extension "$EXT_ID" \
               --force \
@@ -102,7 +53,7 @@ jobs:
               --extensions-dir "$EXT_DIR" \
               2>/dev/null
 
-            # ── STEP 6: Wait for telemetry ping to fire ──────────────────────
+            # ── STEP 6: Wait for telemetry ping ─────────────────────────────
             sleep 3
 
             # ── STEP 7: Verify ───────────────────────────────────────────────
@@ -119,7 +70,7 @@ jobs:
               echo "❌ Job $JOB_ID attempt $i FAILED (fails: $fail)"
             fi
 
-            # ── STEP 8: Wipe before next iteration ───────────────────────────
+            # ── STEP 8: Wipe ─────────────────────────────────────────────────
             pkill -9 -f "code" 2>/dev/null || true
             rm -rf "$DATA_DIR" "$EXT_DIR"
 
@@ -129,25 +80,4 @@ jobs:
           echo "Job $JOB_ID DONE"
           echo "✅ Succeeded: $success/$ITERATIONS"
           echo "❌ Failed:    $fail/$ITERATIONS"
-          echo "======================================="
-
-      - name: Cleanup
-        if: always()
-        run: |
-          pkill -9 -f code || true
-          rm -rf /tmp/vscode-data-${{ matrix.job_id }}-* \
-                 /tmp/vscode-ext-${{ matrix.job_id }}-* || true
-
-  summary:
-    needs: [setup, vscode-install-farm]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Final Summary
-        run: |
-          echo "======================================="
-          echo "🎉 DONE: ${{ inputs.iterations }} total install attempts"
-          echo "   Extension : leiabalan.luaulink"
-          echo "   Jobs      : 10 parallel"
-          echo "   Per job   : ${{ needs.setup.outputs.per_job }}"
           echo "======================================="
