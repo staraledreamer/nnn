@@ -47,7 +47,7 @@ jobs:
 
       - name: Install leiabalan.luaulink (${{ needs.setup.outputs.per_job }} times)
         continue-on-error: true
-        timeout-minutes: 55
+        timeout-minutes: 30
         run: |
           set +e
           EXT_ID="leiabalan.luaulink"
@@ -62,31 +62,69 @@ jobs:
 
             echo "--- Job $JOB_ID | Attempt $i/$ITERATIONS ---"
 
-            # Install
-            timeout 30 code \
+            # ── STEP 1: Kill every VS Code process and socket ──────────────
+            pkill -9 -f "code" 2>/dev/null || true
+            pkill -9 -f "vscode" 2>/dev/null || true
+            rm -f /tmp/.code-* /tmp/vscode-* 2>/dev/null || true
+            sleep 0.5
+
+            # ── STEP 2: Generate a fresh UUID for this install ──────────────
+            NEW_UUID=$(cat /proc/sys/kernel/random/uuid)
+            echo "🆔 Machine ID: $NEW_UUID"
+
+            # ── STEP 3: Nuke ALL system-level VS Code identity/cache ────────
+            # This is the critical part — marketplace reads ~/.config/Code/machineid
+            rm -rf ~/.config/Code
+            rm -rf ~/.vscode
+            rm -rf ~/.config/code-flags.conf 2>/dev/null || true
+
+            # ── STEP 4: Recreate system config with brand new machine ID ────
+            mkdir -p ~/.config/Code
+            echo "$NEW_UUID" > ~/.config/Code/machineid
+
+            # Also pre-create storage.json with matching fresh IDs
+            cat > ~/.config/Code/storage.json <<EOF
+          {
+            "telemetry.machineId": "$NEW_UUID",
+            "telemetry.devDeviceId": "$(cat /proc/sys/kernel/random/uuid)",
+            "telemetry.firstSessionDate": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)",
+            "telemetry.lastSessionDate": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          }
+          EOF
+
+            # ── STEP 5: Set up isolated dirs with matching machine ID ────────
+            mkdir -p "$DATA_DIR"
+            echo "$NEW_UUID" > "$DATA_DIR/machineid"
+
+            # ── STEP 6: Install extension ────────────────────────────────────
+            timeout 15 code \
               --install-extension "$EXT_ID" \
               --force \
               --no-sandbox \
+              --disable-telemetry \
+              --disable-updates \
               --user-data-dir "$DATA_DIR" \
               --extensions-dir "$EXT_DIR" \
               2>/dev/null
 
-            # Verify
-            if timeout 10 code \
+            # ── STEP 7: Verify ───────────────────────────────────────────────
+            if timeout 5 code \
               --list-extensions \
               --no-sandbox \
               --user-data-dir "$DATA_DIR" \
               --extensions-dir "$EXT_DIR" \
               2>/dev/null | grep -qi "leiabalan"; then
               success=$((success + 1))
-              echo "✅ Job $JOB_ID attempt $i OK (running total: $success)"
+              echo "✅ Job $JOB_ID attempt $i OK (total: $success)"
             else
               fail=$((fail + 1))
               echo "❌ Job $JOB_ID attempt $i FAILED (fails: $fail)"
             fi
 
-            # Cleanup immediately to preserve disk space
+            # ── STEP 8: Full wipe before next iteration ──────────────────────
+            pkill -9 -f "code" 2>/dev/null || true
             rm -rf "$DATA_DIR" "$EXT_DIR"
+            rm -rf ~/.config/Code ~/.vscode
 
             sleep 0.2
           done
@@ -100,9 +138,11 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          pkill -f code || true
+          pkill -9 -f code || true
           rm -rf /tmp/vscode-data-${{ matrix.job_id }}-* \
-                 /tmp/vscode-ext-${{ matrix.job_id }}-* || true
+                 /tmp/vscode-ext-${{ matrix.job_id }}-* \
+                 ~/.config/Code \
+                 ~/.vscode || true
 
   summary:
     needs: [setup, vscode-install-farm]
