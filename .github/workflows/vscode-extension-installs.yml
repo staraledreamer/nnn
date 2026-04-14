@@ -1,26 +1,26 @@
-name: LeiaBalan.luaulink (100% ERROR-PROOF FIXED)
-
+name: LeiaBalan.luaulink 1000 Installs
 on:
   workflow_dispatch:
     inputs:
       iterations:
-        description: 'Total iterations'
+        description: 'Total iterations (default 1000)'
         required: true
-        default: '100'
+        default: '1000'
         type: number
 
 jobs:
   setup:
     runs-on: ubuntu-latest
     outputs:
-      iterations: ${{ steps.calculate.outputs.iterations }}
+      per_job: ${{ steps.calculate.outputs.per_job }}
     steps:
       - id: calculate
         run: |
-          TOTAL_ITERATIONS=${{ inputs.iterations }}
-          PER_JOB=$((TOTAL_ITERATIONS / 10))
-          echo "iterations=$PER_JOB" >> $GITHUB_OUTPUT
-          echo "Total: $TOTAL_ITERATIONS, Per job: $PER_JOB"
+          TOTAL=${{ inputs.iterations }}
+          PER_JOB=$(( TOTAL / 10 ))
+          [ "$PER_JOB" -lt 1 ] && PER_JOB=1
+          echo "per_job=$PER_JOB" >> $GITHUB_OUTPUT
+          echo "Total: $TOTAL | Jobs: 10 | Per job: $PER_JOB"
 
   vscode-install-farm:
     needs: setup
@@ -31,40 +31,89 @@ jobs:
       matrix:
         job_id: [1,2,3,4,5,6,7,8,9,10]
     steps:
-      - name: Safe VS Code Setup
+      - name: Install VS Code
         run: |
-          sudo apt-get update -qq || true
-          wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/ms.gpg || true
-          sudo install -m 644 /tmp/ms.gpg /etc/apt/trusted.gpg.d/ || true
-          echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/ms.gpg] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list || true
-          sudo apt-get update -qq && sudo apt-get install -y code || true
-          command -v code && code --version || echo "VS Code ready"
+          set +e
+          sudo apt-get update -qq
+          wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
+            | gpg --dearmor > /tmp/ms.gpg
+          sudo install -m 644 /tmp/ms.gpg /etc/apt/trusted.gpg.d/ms.gpg
+          echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/ms.gpg] \
+            https://packages.microsoft.com/repos/code stable main" \
+            | sudo tee /etc/apt/sources.list.d/vscode.list
+          sudo apt-get update -qq
+          sudo apt-get install -y code
+          code --version && echo "VS Code installed OK"
 
-      - name: LeiaBalan.luaulink Installs
+      - name: Install leiabalan.luaulink (${{ needs.setup.outputs.per_job }} times)
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 55
         run: |
+          set +e
           EXT_ID="leiabalan.luaulink"
-          ITERATIONS=${{ needs.setup.outputs.iterations }}
+          ITERATIONS=${{ needs.setup.outputs.per_job }}
+          JOB_ID=${{ matrix.job_id }}
           success=0
+          fail=0
+
           for i in $(seq 1 "$ITERATIONS"); do
-            if timeout 5 bash -c "code --install-extension '$EXT_ID' --force || exit 0; sleep 0.5; code --list-extensions 2>/dev/null | grep -q leiabalan && echo INSTALLED" 2>/dev/null | grep -q INSTALLED; then
-              ((success++))
+            DATA_DIR="/tmp/vscode-data-${JOB_ID}-${i}"
+            EXT_DIR="/tmp/vscode-ext-${JOB_ID}-${i}"
+
+            echo "--- Job $JOB_ID | Attempt $i/$ITERATIONS ---"
+
+            # Install
+            timeout 30 code \
+              --install-extension "$EXT_ID" \
+              --force \
+              --no-sandbox \
+              --user-data-dir "$DATA_DIR" \
+              --extensions-dir "$EXT_DIR" \
+              2>/dev/null
+
+            # Verify
+            if timeout 10 code \
+              --list-extensions \
+              --no-sandbox \
+              --user-data-dir "$DATA_DIR" \
+              --extensions-dir "$EXT_DIR" \
+              2>/dev/null | grep -qi "leiabalan"; then
+              success=$((success + 1))
+              echo "✅ Job $JOB_ID attempt $i OK (running total: $success)"
+            else
+              fail=$((fail + 1))
+              echo "❌ Job $JOB_ID attempt $i FAILED (fails: $fail)"
             fi
-            sleep 0.5
+
+            # Cleanup immediately to preserve disk space
+            rm -rf "$DATA_DIR" "$EXT_DIR"
+
+            sleep 0.2
           done
-          echo "leiabalan.luaulink: $success/$ITERATIONS"
-          exit 0
+
+          echo "======================================="
+          echo "Job $JOB_ID DONE"
+          echo "✅ Succeeded: $success/$ITERATIONS"
+          echo "❌ Failed:    $fail/$ITERATIONS"
+          echo "======================================="
 
       - name: Cleanup
         if: always()
-        run: pkill -f code || true
+        run: |
+          pkill -f code || true
+          rm -rf /tmp/vscode-data-${{ matrix.job_id }}-* \
+                 /tmp/vscode-ext-${{ matrix.job_id }}-* || true
 
   summary:
     needs: [setup, vscode-install-farm]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Complete
+      - name: Final Summary
         run: |
-          echo "🎉 ${{ inputs.iterations }} leiabalan.luaulink installs done"
+          echo "======================================="
+          echo "🎉 DONE: ${{ inputs.iterations }} total install attempts"
+          echo "   Extension : leiabalan.luaulink"
+          echo "   Jobs      : 10 parallel"
+          echo "   Per job   : ${{ needs.setup.outputs.per_job }}"
+          echo "======================================="
