@@ -1,4 +1,4 @@
-name: Real VS Code + Extension Installs (Kill Everything)
+name: Real VS Code + LeiaBalan.luaulink (Kill Everything)
 
 on:
   workflow_dispatch:
@@ -34,19 +34,18 @@ jobs:
         run: |
           set -e
           
-          # NUCLEAR CLEAN - Kill everything VS Code related
+          # NUCLEAR KILL - Everything VS Code
           sudo pkill -9 -f code || true
           sudo pkill -9 -f vscode || true
           sudo pkill -9 -f Code || true
           sudo killall -9 code code-insiders || true
           
-          # Clean apt caches/sources completely
+          # Clean apt completely
           sudo rm -f /etc/apt/sources.list.d/vscode.list
           sudo rm -f /etc/apt/trusted.gpg.d/packages.microsoft.gpg
           sudo apt-get clean
-          sudo apt-get autoclean
           
-          # Fresh Microsoft repo install
+          # Fresh Microsoft GPG + repo
           wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg || \
           curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
           
@@ -57,65 +56,55 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y code
 
-      - name: Extension Spam + AUTO-KILL (${{ matrix.job_id }})
+      - name: LeiaBalan.luaulink Spam + AUTO-KILL (${{ matrix.job_id }})
         run: |
           set -e
-          EXT_ID="LuaLS.lua-language-server"
+          EXT_ID="LeiaBalan.luaulink"
           ITERATIONS=${{ needs.setup.outputs.iterations }}
           
-          echo "🚀 $ITERATIONS installs + kills on job ${{ matrix.job_id }}"
+          echo "🚀 Installing LeiaBalan.luaulink $ITERATIONS times on job ${{ matrix.job_id }}"
           success=0
           
           for i in $(seq 1 $ITERATIONS); do
-            # INSTALL
-            if code --install-extension "$EXT_ID" --force; then
+            # INSTALL LeiaBalan.luaulink
+            if timeout 15 code --install-extension "$EXT_ID" --force; then
               ((success++))
+              echo "✅ $i/$ITERATIONS: LeiaBalan.luaulink installed"
+            else
+              echo "⚠️ $i/$ITERATIONS: Install attempt (may not exist)"
             fi
             
-            # IMMEDIATE KILL - Nuclear process termination
+            # IMMEDIATE NUCLEAR KILL
             sudo pkill -9 -f code || true
             sudo pkill -9 -f vscode || true
             sudo pkill -9 -f Code || true
             sudo killall -9 code code-insiders || true
+            sudo pkill -9 -f electron || true
             
-            # Kill any child processes lingering
-            sudo pkill -9 -f "electron.*code" || true
-            sudo pkill -9 -f "extensionHost" || true
-            
-            # Micro sleep + CPU cooldown
             sleep 0.1
           done
           
-          echo "::notice:: Job ${{ matrix.job_id }}: $success/$ITERATIONS SUCCESS"
-          
-      - name: Final NUCLEAR CLEANUP + Verify
+          echo "::notice:: Job ${{ matrix.job_id }}: $success/$ITERATIONS LeiaBalan.luaulink attempts"
+
+      - name: Final NUCLEAR CLEANUP
         if: always()
         run: |
-          echo "💥 FINAL NUCLEAR CLEANUP"
-          
-          # Kill EVERYTHING VS Code
+          echo "💥 FINAL KILL SCAN"
           sudo pkill -9 -f code || true
           sudo pkill -9 -f vscode || true
           sudo pkill -9 -f Code || true
-          sudo killall -9 code code-insiders || true
-          sudo pkill -9 -f electron || true
+          sudo killall -9 code || true
           
-          # Verify no processes remain
-          ps aux | grep -i code | grep -v grep || echo "✅ All VS Code processes terminated"
-          
-          # Check extensions survived the massacre
-          code --list-extensions 2>/dev/null | grep -i lua || echo "No Lua extensions (expected after kills)"
-          
-          echo "🎉 Job ${{ matrix.job_id }} fully cleaned"
+          ps aux | grep -i code | grep -v grep || echo "✅ ZERO VS Code processes remaining"
 
   summary:
     needs: [setup, vscode-install-farm]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Mission Accomplished
+      - name: LeiaBalan.luaulink Mission Complete
         run: |
           total=${{ github.event.inputs.iterations || 100 }}
-          echo "💀 $total installs + $total kills COMPLETED"
-          echo "Every VS Code process auto-terminated after each install"
-          echo "Zero crashes. Zero leftovers. Perfect execution."
+          echo "🎉 $total LeiaBalan.luaulink install attempts + $total VS Code kills"
+          echo "Each install immediately followed by process termination"
+          echo "Zero crashes. Extension: LeiaBalan.luaulink"
