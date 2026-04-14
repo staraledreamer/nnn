@@ -7,31 +7,54 @@ jobs:
   vscode-install-farm:
     runs-on: ubuntu-latest
     steps:
+      - name: Pre-install Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y snapd wget gpg apt-transport-https software-properties-common
+          
       - name: Install VS Code and Extension (1000x)
         run: |
+          # Install VS Code once
+          sudo snap install code --classic
+          
+          # Counter for tracking
+          success=0
+          failed=0
+          
           for i in $(seq 1 1000); do
             echo "========================================"
             echo "Iteration $i/1000"
             echo "========================================"
             
-            # Install VS Code
-            sudo wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
-            sudo install -o root -g root -m 644 packages.microsoft.gpg /etc/apt/trusted.gpg.d/
-            sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/trusted.gpg.d/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
-            sudo apt-get update -qq
-            sudo apt-get install -y code
-            
             # Install extension
-            echo "Installing LeiaBalan.luauLink..."
-            code --install-extension LeiaBalan.luauLink --force
-            
-            # Verify
-            if code --list-extensions | grep -q luauLink; then
-              echo "✅ Iteration $i: SUCCESS"
+            if code --install-extension LeiaBalan.luauLink --force 2>/dev/null; then
+              # Verify installation
+              if code --list-extensions 2>/dev/null | grep -q luauLink; then
+                echo "✅ Iteration $i: SUCCESS"
+                ((success++))
+              else
+                echo "❌ Iteration $i: VERIFICATION FAILED"
+                ((failed++))
+              fi
             else
-              echo "❌ Iteration $i: FAILED"
+              echo "❌ Iteration $i: INSTALLATION FAILED"
+              ((failed++))
             fi
+            
+            # Brief pause to prevent rate limiting
+            sleep 1
             
             echo ""
           done
-          echo "🎉 All 1000 installations complete!"
+          
+          echo "========================================"
+          echo "🎉 FINAL RESULTS"
+          echo "========================================"
+          echo "✅ Successful: $success/1000"
+          echo "❌ Failed: $failed/1000"
+          echo "========================================"
+          
+      - name: Verify Final State
+        run: |
+          echo "Final extension list:"
+          code --list-extensions | grep -i luau
